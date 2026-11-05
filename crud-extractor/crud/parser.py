@@ -209,9 +209,10 @@ class Parser:
             while self._match(T.COMMA):
                 rows.append(self._value_row())
             return ast.Insert(table, columns, rows, None, line=start.line)
+        # TODO(T1): dukung INSERT INTO ... SELECT ... (SPESIFIKASI.md bagian 3 dan 5).
         if self._check_kw("SELECT"):
-            # TODO(T1): dukung INSERT INTO ... SELECT ... (SPESIFIKASI.md bagian 3 dan 5).
-            raise ParseError("INSERT ... SELECT belum didukung", self._peek())
+            query = self._select()
+            return ast.Insert(table, columns, values=[], query=query, line=start.line)
         raise ParseError("diharapkan VALUES atau SELECT", self._peek())
 
     def _value_row(self) -> list:
@@ -248,6 +249,7 @@ class Parser:
     def _expr(self):
         return self._logical()
 
+  #BUG_FIX: AND dan OR harusnya punya presedensi lebih rendah daripada NOT dan operator lain 
     def _logical(self):
         # OR dan AND: operator logika biner, asosiatif kiri.
         left = self._not()
