@@ -180,3 +180,58 @@ def test_regresi_parser_panic_mode_recovery():
     assert len(script.statements) == 1
     assert isinstance(script.statements[0], ast.Update)
     assert script.statements[0].table.name == "produk"
+
+
+# =============================================================================
+# TEST REGRESI — RESOLVER (Fase 4)
+# =============================================================================
+
+from crud.resolver import Resolver
+
+
+def resolve(sql):
+    script = parse_sql(sql)
+    assert script.errors == [], script.errors
+    diagnostics = Resolver().resolve_script(script)
+    return script, diagnostics
+
+
+def columns(node):
+    return [n for n in ast.iter_nodes(node) if isinstance(n, ast.ColumnRef)]
+
+
+# TODO(T2): Kolom tanpa qualifier pada 1 tabel dan multi tabel (ambigu)
+def test_regresi_resolver_kolom_tanpa_qualifier_ambigu():
+    """TODO(T2): Lebih dari satu tabel di scope terdalam harus warning ambigu dan resolved tetap None."""
+    script, diags = resolve("SELECT nama FROM pelanggan p, pesanan o WHERE id = 1")
+    cols = columns(script)
+    for c in cols:
+        assert c.resolved is None
+    assert any("ambigu tanpa skema" in d.message for d in diags)
+
+
+# Bug 7: Scope leak pada DELETE
+def test_regresi_resolver_scope_leak_delete():
+    """Bug 7: DELETE lupa _pop(), menyebabkan alias s bocor ke statement berikutnya."""
+    sql = """
+    DELETE FROM sesi s WHERE s.id = 1;
+    SELECT s.id FROM pengguna u WHERE u.aktif = 1;
+    """
+    script = parse_sql(sql)
+    assert script.errors == []
+    diags = Resolver().resolve_script(script)
+    # Pada statement kedua, alias 's' tidak boleh terdefinisi
+    assert any(d.level == "error" and "'s'" in d.message for d in diags)
+
+
+# Bug 8: Shadowing rantai scope terbalik
+def test_regresi_resolver_shadowing_dalam_ke_luar():
+    """Bug 8: _lookup mencari dari luar ke dalam (reversed), sehingga shadowing subquery gagal."""
+    sql = "SELECT x.id FROM pelanggan x WHERE x.id IN (SELECT x.pelanggan_id FROM pesanan x WHERE x.total > 500);"
+    script, diags = resolve(sql)
+    assert diags == []
+    inner_cols = [c for c in columns(script.statements[0].where) if c.name == "pelanggan_id"]
+    assert len(inner_cols) == 1
+    # x.pelanggan_id di dalam subquery harus merujuk ke 'pesanan', BUKAN 'pelanggan'
+    assert inner_cols[0].resolved == "pesanan"
+
