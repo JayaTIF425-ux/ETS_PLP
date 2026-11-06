@@ -178,3 +178,137 @@ ditentukan di `analyze_statement`, bukan di helper.
 **Test regresi.** `test_regresi_update_subquery_where`
 
 **Peran AI.** (Verifikasi bug, syntax dan konsep)
+
+---
+
+## Bug 6: Presedensi operator logika `AND` dan `OR` disatukan di satu level
+
+**Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
+
+**Gejala.** Ekspresi logika seperti `a = 1 OR b = 2 AND c = 3` diparse sebagai `(a = 1 OR b = 2) AND c = 3`. Menurut SPESIFIKASI.md §3.1, `AND` memiliki tingkat presedensi 2 (lebih tinggi) dibandingkan `OR` yang berada di tingkat 1, sehingga seharusnya dievaluasi sebagai `a = 1 OR (b = 2 AND c = 3)`.
+
+**Reproduksi minimal.**
+
+```sql
+SELECT id FROM t WHERE a = 1 OR b = 2 AND c = 3
+```
+
+**Akar masalah.** Di fungsi `_logical()`, perulangan `while self._check_kw("AND", "OR")` memproses kedua operator logika secara sejajar dalam satu loop dari kiri ke kanan. Ini melanggar aturan *Stratified Grammar* pada recursive descent parser (*Crafting Interpreters* Bab 6 — Operator Precedence), di mana setiap tingkat presedensi harus dipisahkan ke dalam fungsi berbeda agar operator berpresedensi lebih tinggi dievaluasi terlebih dahulu.
+
+**Perbaikan.** File `crud/parser.py`. Memecah `_logical()` menjadi dua metode berjenjang: `_or_expr()` yang memanggil `_and_expr()`, dan `_and_expr()` yang memanggil `_not()`. Alternatif yang ditolak: merestrukturisasi pohon AST setelah parsing selesai (*tree rewiring*) — ditolak karena membuat kode rumit dan melanggar prinsip *single-pass recursive descent*.
+
+**Test regresi.** `test_regresi_parser_presedensi_and_over_or`
+
+**Peran AI.** (Verifikasi pemisahan hierarki fungsi recursive descent untuk grammar presedensi)
+
+---
+
+## Bug 7: Klausa `LEFT JOIN` menolak kata kunci opsional `OUTER`
+
+**Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
+
+**Gejala.** Query yang memuat klausul `LEFT OUTER JOIN` menghasilkan `ParseError: diharapkan JOIN, ditemukan 'OUTER'`. Menurut SPESIFIKASI.md §3, grammar klausul join memperbolehkan token opsional `OUTER`: `[ "INNER" | "LEFT" [ "OUTER" ] ] "JOIN"`.
+
+**Reproduksi minimal.**
+
+```sql
+SELECT a.id FROM a LEFT OUTER JOIN b ON b.a_id = a.id
+```
+
+**Akar masalah.** Di fungsi `_join()`, setelah mencocokkan kata kunci `LEFT`, parser langsung memanggil `self._expect_kw("JOIN")` tanpa memeriksa kemungkinan adanya token opsional `OUTER`. Ini melanggar aturan produksi grammar untuk klausul join (*Crafting Interpreters* Bab 6 — Parsing Grammar Productions).
+
+**Perbaikan.** File `crud/parser.py`, fungsi `_join()`. Menambahkan `self._match_kw("OUTER")` setelah pencocokan `LEFT` untuk mengonsumsi token `OUTER` jika ada. Alternatif yang ditolak: menggabungkan `"LEFT OUTER"` menjadi satu token di lexer — ditolak karena `LEFT` dan `OUTER` adalah dua lexeme terpisah yang masing-masing merupakan keyword mandiri.
+
+**Test regresi.** `test_regresi_parser_left_outer_join`
+
+**Peran AI.** (Verifikasi aturan produksi grammar SQL pada klausa join)
+
+---
+
+## Bug 8: Panic mode error recovery membuang seluruh sisa token hingga EOF
+
+**Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
+
+**Gejala.** Jika sebuah file SQL memiliki lebih dari satu statement dan salah satu statement mengandung kesalahan sintaks, seluruh statement valid berikutnya ikut terbuang dan tidak menghasilkan keluaran di CRUD matrix. Menurut SPESIFIKASI.md §6, panic mode harus membuang token sampai dan termasuk `;` berikutnya, lalu melanjutkan parsing statement berikutnya.
+
+**Reproduksi minimal.**
+
+```sql
+SELECT id nama, FROM pesanan;
+UPDATE produk SET stok = stok - 1 WHERE id = :id;
+```
+
+**Akar masalah.** Fungsi `_synchronize()` mengonsumsi token dengan loop `while not self._at_end(): self._advance()`, yang membuang semua token hingga akhir file (`EOF`). Ini melanggar konsep *Panic Mode Error Recovery* (*Crafting Interpreters* Bab 6 — Panic Mode Recovery), di mana parser harus menyinkronkan diri pada batas statement terdekat (*synchronization point*, yaitu titik koma `;`).
+
+**Perbaikan.** File `crud/parser.py`, fungsi `_synchronize()`. Mengubah loop agar berhenti begitu mengonsumsi token `T.SEMICOLON` (`if self._advance().type == T.SEMICOLON: return`). Alternatif yang ditolak: sinkronisasi berbasis kata kunci statement (`SELECT`, `UPDATE`) — ditolak karena SPESIFIKASI.md §6 secara eksplisit mewajibkan sinkronisasi sampai dan termasuk `;` berikutnya.
+
+**Test regresi.** `test_regresi_parser_panic_mode_recovery`
+
+**Peran AI.** (Verifikasi perilaku pemulihan panic-mode pada batas delimiter statement)
+
+---
+
+## Bug 9: Kebocoran scope (*Scope Leak*) pada statement `DELETE`
+
+**Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
+
+**Gejala.** Alias tabel dari statement `DELETE` masih terlihat dan dapat diakses oleh statement berikutnya. Menurut SPESIFIKASI.md §4.5, setiap statement berdiri sendiri dan alias dari statement sebelumnya tidak boleh terlihat oleh statement berikutnya.
+
+**Reproduksi minimal.**
+
+```sql
+DELETE FROM sesi s WHERE s.id = 1;
+SELECT s.id FROM pengguna u WHERE u.aktif = 1;
+```
+
+**Akar masalah.** Di `Resolver._delete()`, fungsi memanggil `self._push()` untuk membuka scope baru, namun lupa memanggil `self._pop()` saat selesai. Akibatnya, scope `DELETE` tidak pernah dihancurkan dan menjadi parent scope dari statement berikutnya (*Crafting Interpreters* Bab 11 — Resolving and Binding / Scope Management).
+
+**Perbaikan.** File `crud/resolver.py`, fungsi `_delete()`. Menambahkan pemanggilan `self._pop()` di akhir blok `_delete()`. Alternatif yang ditolak: mereset `self.scope = None` di `resolve_statement()` — ditolak karena membiarkan inkonsistensi struktur push-pop di dalam blok fungsi statement.
+
+**Test regresi.** `test_regresi_resolver_scope_leak_delete`
+
+**Peran AI.** (Verifikasi siklus hidup scope push-pop pada AST resolver)
+
+---
+
+## Bug 10: Urutan pencarian scope terbalik pada `_lookup()` (Shadowing subquery rusak)
+
+**Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
+
+**Gejala.** Pada correlated subquery yang mendeklarasikan alias yang sama dengan query luar, kolom di dalam subquery salah ter-resolve ke tabel luar. Menurut SPESIFIKASI.md §4.3, qualifier harus dicari mulai dari scope terdalam ke luar, sehingga alias di subquery harus membayangi (*shadowing*) alias luar.
+
+**Reproduksi minimal.**
+
+```sql
+SELECT x.id FROM pelanggan x WHERE x.id IN (SELECT x.pelanggan_id FROM pesanan x WHERE x.total > 500);
+```
+
+**Akar masalah.** Di fungsi `_lookup()`, rantai scope dikumpulkan dari `self.scope` (terdalam) ke `scope.parent` (terluar), namun kemudian diiterasi dengan `for scope in reversed(chain)`. Hal ini menyebabkan pencarian berjalan dari scope terluar ke terdalam, sehingga alias luar menutupi alias subquery (*Crafting Interpreters* Bab 11 — Resolving and Binding / Lexical Scoping).
+
+**Perbaikan.** File `crud/resolver.py`, fungsi `_lookup()`. Menghilangkan penggunaan array `chain` dan `reversed()`, lalu langsung menelusuri pointer rantai parent: `while scope is not None: if name in scope.entries: return ... scope = scope.parent`. Alternatif yang ditolak: menyimpan scope dalam stack dan indexing terbalik — ditolak karena struktur pointer linked-list parent chain lebih sederhana dan sesuai dengan pola buku teks.
+
+**Test regresi.** `test_regresi_resolver_shadowing_dalam_ke_luar`
+
+**Peran AI.** (Verifikasi arah traversal rantai lexical environment)
+
+---
+
+## Bug 11: Traversal `column_usage` untuk baris data `INSERT VALUES`
+
+**Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
+
+**Gejala.** Pada statement `INSERT INTO ... VALUES (...)`, pemanggilan `reads(stmt.values)` pada struktur list-of-lists berpotensi tidak membaca ekspresi baris nilai secara deterministik jika node bukan merupakan dataclass datar. Menurut SPESIFIKASI.md §7 dan §8, penggunaan kolom harus mencatat kolom yang dibuat (`C`) dan dibaca (`R`).
+
+**Reproduksi minimal.**
+
+```sql
+INSERT INTO log (id, nama) VALUES (1, 'test');
+```
+
+**Akar masalah.** Di fungsi `column_usage()`, argumen `stmt.values` diteruskan langsung ke `reads()`. Karena `values` adalah list of rows (`list[list[expr]]`), traversal lebih aman dan deterministik jika dilakukan per-baris dan per-ekspresi (*Crafting Interpreters* Bab 5 — Representing Code / AST Traversal).
+
+**Perbaikan.** File `crud/analyzer.py`, fungsi `column_usage()`. Mengubah `reads(stmt.values)` menjadi loop eksplisit: `for row in stmt.values: for expr in row: reads(expr)`. Alternatif yang ditolak: memodifikasi utilitas umum `iter_nodes` — ditolak karena `iter_nodes` adalah API publik (SPESIFIKASI.md §7) yang tidak boleh diubah perilakunya.
+
+**Test regresi.** `test_regresi_column_usage_insert_values`
+
+**Peran AI.** (Verifikasi integritas API publik ast_nodes dan traversal nested list)
