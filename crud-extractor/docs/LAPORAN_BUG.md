@@ -4,31 +4,6 @@ Salin blok di bawah untuk setiap bug. Bagian **Akar masalah** wajib ditulis deng
 sendiri dan memakai konsep dari *Crafting Interpreters* (sebutkan bab). Bagian ini diuji lisan.
 
 ---
-
-## Bug 1: (judul singkat)
-
-**Ditemukan oleh:** (nama) · **Diperbaiki oleh:** (nama)
-
-**Gejala.** Input, output yang didapat, dan output yang diharapkan menurut SPESIFIKASI.md
-(sebutkan bagiannya).
-
-**Reproduksi minimal.** SQL terpendek yang memicu bug:
-
-```sql
-
-```
-
-**Akar masalah.** Mengapa kode lama salah? Konsep apa yang dilanggar?
-
-**Perbaikan.** File dan fungsi yang diubah, serta alasannya. Sebutkan juga perbaikan
-alternatif yang kalian pertimbangkan dan alasan tidak memilihnya.
-
-**Test regresi.** Nama test di `tests/test_tambahan.py` yang gagal sebelum perbaikan dan lulus
-sesudahnya.
-
-**Peran AI.** Apakah AI membantu menemukan atau memperbaiki bug ini? Bagaimana kalian
-memverifikasinya?
-
 ---
 
 ## Bug 1: Keyword tidak dinormalisasi ke huruf besar
@@ -61,38 +36,7 @@ tidak seharusnya tahu detail representasi teks mentah SQL.
 
 ---
 
-## Bug 2: Komentar blok `/* */` selalu throw error
-
-**Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
-
-**Gejala.** Input apapun yang mengandung `/*` langsung menghasilkan `LexError("komentar
-blok belum didukung")`, padahal menurut SPESIFIKASI.md §2.3 komentar blok harus diproses
-dan tidak menghasilkan token. Hanya komentar yang tidak ditutup yang boleh `LexError`.
-
-**Reproduksi minimal.**
-
-```sql
-/* komentar */ SELECT id FROM t
-```
-
-**Akar masalah.** Implementasi hanya berisi `raise LexError` tanpa memproses karakter
-apapun — fitur belum diimplementasi sama sekali. Ini melanggar prinsip *scanning*
-(Crafting Interpreters Bab 4) bahwa lexer harus mengonsumsi seluruh karakter yang
-membentuk satu lexeme sebelum menghasilkan token (atau tidak menghasilkan token untuk
-komentar).
-
-**Perbaikan.** File `crud/lexer.py`, fungsi `_scan_token()`. Loop karakter per karakter
-ditambahkan untuk mengonsumsi isi komentar sampai ditemukan `*/`, dengan `raise LexError`
-hanya jika EOF tercapai sebelum penutup. Alternatif yang ditolak: `str.find("*/")` —
-ditolak karena tidak bisa melacak `\n` untuk memperbarui posisi baris dan kolom.
-
-**Test regresi.** `test_regresi_komentar_blok_valid`
-
-**Peran AI.** (Verifikasi bug, syntax dan konsep)
-
----
-
-## Bug 3: Operator `<>` tidak dikenali
+## Bug 2: Operator `<>` tidak dikenali
 
 **Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
 
@@ -121,7 +65,7 @@ di lexer, bukan parser.
 
 ---
 
-## Bug 4: Escape `''` dalam string tidak ditangani
+## Bug 3: Escape `''` dalam string tidak ditangani
 
 **Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
 
@@ -151,7 +95,7 @@ ditolak karena informasi posisi karakter sudah tidak akurat setelah lexer selesa
 
 ---
 
-## Bug 5: Subquery di `SET`/`WHERE` UPDATE ditandai `U`, seharusnya `R`
+## Bug 4: Subquery di `SET`/`WHERE` UPDATE ditandai `U`, seharusnya `R`
 
 **Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
 
@@ -181,7 +125,7 @@ ditentukan di `analyze_statement`, bukan di helper.
 
 ---
 
-## Bug 6: Presedensi operator logika `AND` dan `OR` disatukan di satu level
+## Bug 5: Presedensi operator logika `AND` dan `OR` disatukan di satu level
 
 **Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
 
@@ -203,7 +147,7 @@ SELECT id FROM t WHERE a = 1 OR b = 2 AND c = 3
 
 ---
 
-## Bug 7: Klausa `LEFT JOIN` menolak kata kunci opsional `OUTER`
+## Bug 6: Klausa `LEFT JOIN` menolak kata kunci opsional `OUTER`
 
 **Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
 
@@ -225,7 +169,7 @@ SELECT a.id FROM a LEFT OUTER JOIN b ON b.a_id = a.id
 
 ---
 
-## Bug 8: Panic mode error recovery membuang seluruh sisa token hingga EOF
+## Bug 7: Panic mode error recovery membuang seluruh sisa token hingga EOF
 
 **Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
 
@@ -248,7 +192,7 @@ UPDATE produk SET stok = stok - 1 WHERE id = :id;
 
 ---
 
-## Bug 9: Kebocoran scope (*Scope Leak*) pada statement `DELETE`
+## Bug 8: Kebocoran scope (*Scope Leak*) pada statement `DELETE`
 
 **Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
 
@@ -271,7 +215,7 @@ SELECT s.id FROM pengguna u WHERE u.aktif = 1;
 
 ---
 
-## Bug 10: Urutan pencarian scope terbalik pada `_lookup()` (Shadowing subquery rusak)
+## Bug 9: Urutan pencarian scope terbalik pada `_lookup()` (Shadowing subquery rusak)
 
 **Ditemukan oleh:** (Salman) · **Diperbaiki oleh:** (Salman)
 
@@ -293,7 +237,7 @@ SELECT x.id FROM pelanggan x WHERE x.id IN (SELECT x.pelanggan_id FROM pesanan x
 
 ---
 
-## Bug 11: Traversal `column_usage` untuk baris data `INSERT VALUES`
+## Bug 10: Traversal `column_usage` untuk baris data `INSERT VALUES`
 
 **Ditemukan oleh:** (Iryansyah) · **Diperbaiki oleh:** (Iryansyah)
 
