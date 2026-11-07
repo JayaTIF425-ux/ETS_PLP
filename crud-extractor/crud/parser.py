@@ -211,7 +211,6 @@ class Parser:
             while self._match(T.COMMA):
                 rows.append(self._value_row())
             return ast.Insert(table, columns, rows, None, line=start.line)
-        # TODO(T1): dukung INSERT INTO ... SELECT ... (SPESIFIKASI.md bagian 3 dan 5).
         if self._check_kw("SELECT"):
             query = self._select()
             return ast.Insert(table, columns, values=[], query=query, line=start.line)
