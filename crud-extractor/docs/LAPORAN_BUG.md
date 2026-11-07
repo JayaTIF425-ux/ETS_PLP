@@ -4,7 +4,6 @@ Salin blok di bawah untuk setiap bug. Bagian **Akar masalah** wajib ditulis deng
 sendiri dan memakai konsep dari *Crafting Interpreters* (sebutkan bab). Bagian ini diuji lisan.
 
 ---
----
 
 ## Bug 1: Keyword tidak dinormalisasi ke huruf besar
 
